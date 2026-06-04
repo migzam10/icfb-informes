@@ -102,7 +102,6 @@ def procesar(
             raise ValueError(f"Columna no encontrada en archivo {tipo}: '{col}'. ¿Es el archivo correcto?")
 
     df[COL_ESTADO] = df[COL_ESTADO].str.strip().str.upper()
-    df = df[df[COL_ESTADO] == "VINCULADO"].copy()
 
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
@@ -151,6 +150,7 @@ def procesar(
                 doc = row["_doc"]
                 reg = df_ult[df_ult[COL_DOC] == doc]
                 filas.append({
+                    "ESTADO":             reg[COL_ESTADO].values[0] if not reg.empty else "",
                     "UNIDAD":             reg[COL_UNIDAD].values[0] if not reg.empty else row.get("Nombre de la unidad de servicio", ""),
                     "DOCUMENTO":          doc,
                     "NOMBRE":             reg[COL_NOMBRE].values[0] if not reg.empty and COL_NOMBRE in reg.columns else row.get("Primer Nombre del beneficiario", ""),
@@ -178,12 +178,12 @@ def procesar(
                     if diff_hoy >= intervalo:
                         ids_faltantes.add(usuario)
 
-            cols_f = [c for c in [COL_UNIDAD, COL_DOC, COL_NOMBRE, COL_APELLIDO, COL_DIAG] if c in df_ult.columns]
+            cols_f = [c for c in [COL_ESTADO, COL_UNIDAD, COL_DOC, COL_NOMBRE, COL_APELLIDO, COL_DIAG] if c in df_ult.columns]
             df_faltantes = df_ult[df_ult[COL_DOC].isin(ids_faltantes)][cols_f].copy() if ids_faltantes else pd.DataFrame(columns=cols_f)
 
         if COL_DIAG in df_ult.columns:
             mask = df_ult[COL_DIAG].str.contains(p["patron_alerta"], case=False, na=False, regex=True)
-            cols_a = [c for c in [COL_UNIDAD, COL_DOC, COL_NOMBRE, COL_APELLIDO, COL_DIAG, COL_FECHA] if c in df_ult.columns]
+            cols_a = [c for c in [COL_ESTADO, COL_UNIDAD, COL_DOC, COL_NOMBRE, COL_APELLIDO, COL_DIAG, COL_FECHA] if c in df_ult.columns]
             df_alerta = df_ult[mask][cols_a].copy()
             if COL_FECHA in df_alerta.columns:
                 df_alerta[COL_FECHA] = df_alerta[COL_FECHA].dt.strftime("%Y-%m-%d")
@@ -204,7 +204,7 @@ def procesar(
         resultados.append({
             "contrato":  str(contrato),
             "tipo":      tipo,
-            "vinculados": int(df_c[COL_DOC].nunique()),
+            "vinculados": int(df_c[df_c[COL_ESTADO] == "VINCULADO"][COL_DOC].nunique()),
             "faltantes":  len(df_faltantes),
             "alertas":    len(df_alerta),
             "unidades":   len(hoja_unidades),
