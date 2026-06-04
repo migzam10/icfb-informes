@@ -1,0 +1,25 @@
+# macOS
+.DS_Store
+.AppleDouble
+.LSOverride
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+venv/
+env/
+
+# Uploads / outputs temporales
+tmp/
+uploads/
+outputs/
+
+# IDE / editor
+.vscode/
+.idea/
+*.swp
+
+# Claude Code
+.claude/

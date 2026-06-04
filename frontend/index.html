@@ -1,0 +1,828 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>ICBF — Generador de Informes Nutricionales</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@300;400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap');
+
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg:       #f4f3ef;
+    --surface:  #ffffff;
+    --border:   #d6d3cc;
+    --text:     #1a1916;
+    --muted:    #6b6860;
+    --accent:   #0a5c36;
+    --accent2:  #c8a84b;
+    --danger:   #b83232;
+    --success:  #1a6b3a;
+    --mono:     'IBM Plex Mono', monospace;
+    --sans:     'IBM Plex Sans', sans-serif;
+    --radius:   4px;
+    --shadow:   0 1px 4px rgba(0,0,0,0.08);
+  }
+
+  body {
+    font-family: var(--sans);
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    font-size: 14px;
+    line-height: 1.5;
+  }
+
+  /* ── HEADER ── */
+  header {
+    background: var(--accent);
+    color: #fff;
+    padding: 0 32px;
+    height: 56px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    position: sticky;
+    top: 0;
+    z-index: 100;
+    box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+  }
+  .header-logo {
+    width: 28px; height: 28px;
+    background: var(--accent2);
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    font-weight: 600; font-size: 13px; color: var(--accent);
+    flex-shrink: 0;
+  }
+  header h1 { font-size: 15px; font-weight: 500; letter-spacing: 0.02em; }
+  header span { font-size: 12px; opacity: 0.65; margin-left: auto; font-family: var(--mono); }
+
+  /* ── LAYOUT ── */
+  main {
+    max-width: 760px;
+    margin: 40px auto;
+    padding: 0 20px 80px;
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+  }
+
+  /* ── CARD ── */
+  .card {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    box-shadow: var(--shadow);
+    overflow: hidden;
+  }
+  .card-header {
+    padding: 14px 20px;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    background: #fafaf8;
+  }
+  .card-header h2 {
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 0.05em;
+    text-transform: uppercase;
+    color: var(--muted);
+  }
+  .step-badge {
+    width: 22px; height: 22px;
+    background: var(--accent);
+    color: #fff;
+    border-radius: 50%;
+    font-size: 11px;
+    font-weight: 600;
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+  }
+  .card-body { padding: 20px; }
+
+  /* ── MODO SELECTOR ── */
+  .modo-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+  }
+  .modo-option {
+    border: 2px solid var(--border);
+    border-radius: var(--radius);
+    padding: 16px;
+    cursor: pointer;
+    transition: border-color 0.15s, background 0.15s;
+    position: relative;
+  }
+  .modo-option:hover { border-color: var(--accent); background: #f5fbf7; }
+  .modo-option.active {
+    border-color: var(--accent);
+    background: #f0f8f3;
+  }
+  .modo-option input[type="radio"] {
+    position: absolute; opacity: 0; width: 0; height: 0;
+  }
+  .modo-tag {
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--muted);
+    margin-bottom: 6px;
+  }
+  .modo-option.active .modo-tag { color: var(--accent); }
+  .modo-title {
+    font-size: 14px;
+    font-weight: 600;
+    margin-bottom: 4px;
+    color: var(--text);
+  }
+  .modo-desc {
+    font-size: 12px;
+    color: var(--muted);
+    line-height: 1.4;
+  }
+  .modo-check {
+    position: absolute;
+    top: 12px; right: 12px;
+    width: 18px; height: 18px;
+    border: 2px solid var(--border);
+    border-radius: 50%;
+    display: flex; align-items: center; justify-content: center;
+    transition: all 0.15s;
+  }
+  .modo-option.active .modo-check {
+    border-color: var(--accent);
+    background: var(--accent);
+  }
+  .modo-check::after {
+    content: '';
+    width: 6px; height: 6px;
+    border-radius: 50%;
+    background: #fff;
+    opacity: 0;
+    transition: opacity 0.15s;
+  }
+  .modo-option.active .modo-check::after { opacity: 1; }
+
+  /* ── ARCHIVOS ── */
+  .files-grid {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+  .file-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 12px 14px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    background: #fafaf8;
+    transition: border-color 0.15s;
+  }
+  .file-row:has(.file-input:focus) { border-color: var(--accent); }
+  .file-row.optional { opacity: 0.45; pointer-events: none; transition: opacity 0.2s; }
+  .file-row.optional.enabled { opacity: 1; pointer-events: auto; }
+  .file-icon {
+    width: 32px; height: 32px;
+    background: #e8f5ee;
+    border-radius: var(--radius);
+    display: flex; align-items: center; justify-content: center;
+    flex-shrink: 0;
+    font-size: 16px;
+  }
+  .file-meta { flex: 1; min-width: 0; }
+  .file-label { font-size: 13px; font-weight: 500; display: block; }
+  .file-sub { font-size: 11px; color: var(--muted); font-family: var(--mono); margin-top: 1px; }
+  .file-name {
+    font-size: 11px;
+    color: var(--accent);
+    font-family: var(--mono);
+    margin-top: 2px;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+  .file-input {
+    font-size: 12px;
+    color: var(--muted);
+    cursor: pointer;
+    max-width: 160px;
+  }
+  .file-input::-webkit-file-upload-button {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 4px 10px;
+    font-size: 11px;
+    cursor: pointer;
+    font-family: var(--sans);
+    transition: background 0.15s;
+  }
+  .file-input::-webkit-file-upload-button:hover { background: #f0f8f3; }
+
+  .badge-opcional {
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--muted);
+    background: #eeede9;
+    padding: 2px 6px;
+    border-radius: 2px;
+    flex-shrink: 0;
+  }
+  .badge-requerido {
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--accent);
+    background: #e0f2e8;
+    padding: 2px 6px;
+    border-radius: 2px;
+    flex-shrink: 0;
+  }
+
+  /* ── CONFIG ── */
+  .config-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+  }
+  .config-row label { font-size: 13px; font-weight: 500; }
+  .config-row select {
+    padding: 6px 10px;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    font-family: var(--sans);
+    font-size: 13px;
+    background: var(--surface);
+    color: var(--text);
+    cursor: pointer;
+  }
+  .config-row select:focus { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .config-hint { font-size: 11px; color: var(--muted); margin-left: auto; }
+
+  /* ── BOTÓN PRINCIPAL ── */
+  .btn-run {
+    width: 100%;
+    padding: 14px;
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    border-radius: var(--radius);
+    font-family: var(--sans);
+    font-size: 14px;
+    font-weight: 600;
+    letter-spacing: 0.03em;
+    cursor: pointer;
+    transition: background 0.15s, transform 0.1s;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+  }
+  .btn-run:hover:not(:disabled) { background: #084d2e; }
+  .btn-run:active:not(:disabled) { transform: scale(0.99); }
+  .btn-run:disabled { opacity: 0.5; cursor: not-allowed; }
+
+  /* ── PROGRESO ── */
+  #progress-section { display: none; }
+  .progress-bar-wrap {
+    height: 4px;
+    background: var(--border);
+    border-radius: 2px;
+    overflow: hidden;
+    margin-bottom: 10px;
+  }
+  .progress-bar {
+    height: 100%;
+    background: var(--accent);
+    border-radius: 2px;
+    width: 0%;
+    transition: width 0.4s ease;
+  }
+  .progress-bar.indeterminate {
+    width: 40%;
+    animation: slide 1.2s ease-in-out infinite;
+  }
+  @keyframes slide {
+    0%   { margin-left: -40%; }
+    100% { margin-left: 100%; }
+  }
+  .progress-msg {
+    font-size: 12px;
+    color: var(--muted);
+    font-family: var(--mono);
+  }
+
+  /* ── RESULTADOS ── */
+  #result-section { display: none; }
+  .result-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 10px;
+    margin-bottom: 20px;
+  }
+  .stat-box {
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    padding: 14px;
+    text-align: center;
+  }
+  .stat-val {
+    font-size: 28px;
+    font-weight: 300;
+    font-family: var(--mono);
+    line-height: 1;
+    margin-bottom: 4px;
+  }
+  .stat-val.danger { color: var(--danger); }
+  .stat-val.warning { color: #a06800; }
+  .stat-label { font-size: 11px; color: var(--muted); text-transform: uppercase; letter-spacing: 0.06em; }
+
+  .result-table-wrap { overflow-x: auto; margin-bottom: 20px; }
+  .result-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 12px;
+  }
+  .result-table th {
+    background: #f0f2ee;
+    padding: 8px 12px;
+    text-align: left;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.07em;
+    text-transform: uppercase;
+    color: var(--muted);
+    border-bottom: 2px solid var(--border);
+    white-space: nowrap;
+  }
+  .result-table td {
+    padding: 8px 12px;
+    border-bottom: 1px solid var(--border);
+    font-family: var(--mono);
+    vertical-align: middle;
+  }
+  .result-table tr:last-child td { border-bottom: none; }
+  .result-table tr:hover td { background: #f8f9f6; }
+  .chip {
+    display: inline-flex;
+    align-items: center;
+    padding: 2px 8px;
+    border-radius: 10px;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    font-family: var(--sans);
+  }
+  .chip-ok    { background: #e0f2e8; color: var(--success); }
+  .chip-warn  { background: #fff3cd; color: #7a5000; }
+  .chip-danger{ background: #fde8e8; color: var(--danger); }
+
+  .btn-download {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 10px 18px;
+    background: var(--surface);
+    border: 2px solid var(--accent);
+    border-radius: var(--radius);
+    color: var(--accent);
+    font-family: var(--sans);
+    font-size: 13px;
+    font-weight: 600;
+    cursor: pointer;
+    text-decoration: none;
+    transition: background 0.15s;
+  }
+  .btn-download:hover { background: #f0f8f3; }
+
+  .btn-reset {
+    padding: 10px 18px;
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    color: var(--muted);
+    font-family: var(--sans);
+    font-size: 13px;
+    cursor: pointer;
+    transition: border-color 0.15s;
+  }
+  .btn-reset:hover { border-color: var(--text); color: var(--text); }
+
+  .action-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+
+  /* ── ERROR ── */
+  #error-section { display: none; }
+  .error-box {
+    background: #fde8e8;
+    border: 1px solid #f5c0c0;
+    border-radius: var(--radius);
+    padding: 16px;
+    color: var(--danger);
+    font-size: 13px;
+    display: flex;
+    gap: 10px;
+    align-items: flex-start;
+  }
+  .error-box strong { display: block; margin-bottom: 4px; }
+
+  /* ── DIVIDER ── */
+  .section-divider {
+    font-size: 11px;
+    color: var(--muted);
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin: 6px 0 14px;
+  }
+  .section-divider::before, .section-divider::after {
+    content: '';
+    flex: 1;
+    height: 1px;
+    background: var(--border);
+  }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="header-logo">IC</div>
+  <h1>Generador de Informes Nutricionales — ICBF</h1>
+  <span id="clock"></span>
+</header>
+
+<main>
+
+  <!-- PASO 1: MODO -->
+  <div class="card">
+    <div class="card-header">
+      <div class="step-badge">1</div>
+      <h2>Seleccionar modo de análisis</h2>
+    </div>
+    <div class="card-body">
+      <div class="modo-grid">
+        <label class="modo-option active" id="modo-basico-label">
+          <input type="radio" name="modo" value="basico" checked onchange="setModo('basico')">
+          <div class="modo-check"></div>
+          <div class="modo-tag">Modo 1</div>
+          <div class="modo-title">Básico</div>
+          <div class="modo-desc">Solo archivos de nutrición. Detecta huecos históricos entre tomas registradas.</div>
+        </label>
+        <label class="modo-option" id="modo-completo-label">
+          <input type="radio" name="modo" value="completo" onchange="setModo('completo')">
+          <div class="modo-check"></div>
+          <div class="modo-tag">Modo 2</div>
+          <div class="modo-title">Completo</div>
+          <div class="modo-desc">Incluye listado de activos. Detecta también quienes nunca tuvieron toma registrada.</div>
+        </label>
+      </div>
+    </div>
+  </div>
+
+  <!-- PASO 2: ARCHIVOS -->
+  <div class="card">
+    <div class="card-header">
+      <div class="step-badge">2</div>
+      <h2>Cargar archivos</h2>
+    </div>
+    <div class="card-body">
+      <div class="files-grid">
+
+        <div class="file-row" id="row-general">
+          <div class="file-icon">📊</div>
+          <div class="file-meta">
+            <span class="file-label">General por Toma</span>
+            <span class="file-sub">ICBFCUEGeneralPorToma.xlsx</span>
+            <span class="file-name" id="name-general">Sin archivo</span>
+          </div>
+          <span class="badge-requerido">Requerido</span>
+          <input class="file-input" type="file" accept=".xlsx,.xls,.csv"
+                 onchange="setFileName(this, 'name-general')">
+        </div>
+
+        <div class="file-row" id="row-gestante">
+          <div class="file-icon">📋</div>
+          <div class="file-meta">
+            <span class="file-label">Gestante y Lactante</span>
+            <span class="file-sub">GestanteLactantePorToma.xlsx</span>
+            <span class="file-name" id="name-gestante">Sin archivo</span>
+          </div>
+          <span class="badge-requerido">Requerido</span>
+          <input class="file-input" type="file" accept=".xlsx,.xls,.csv"
+                 onchange="setFileName(this, 'name-gestante')">
+        </div>
+
+        <div class="file-row optional" id="row-activos">
+          <div class="file-icon">👥</div>
+          <div class="file-meta">
+            <span class="file-label">Beneficiarios Activos</span>
+            <span class="file-sub">ICBFCUEBeneficiariosPIActivosRegionalizado.xlsx</span>
+            <span class="file-name" id="name-activos">Sin archivo</span>
+          </div>
+          <span class="badge-opcional" id="badge-activos">Opcional</span>
+          <input class="file-input" type="file" accept=".xlsx,.xls,.csv"
+                 id="input-activos" onchange="setFileName(this, 'name-activos')">
+        </div>
+
+      </div>
+    </div>
+  </div>
+
+  <!-- PASO 3: CONFIG -->
+  <div class="card">
+    <div class="card-header">
+      <div class="step-badge">3</div>
+      <h2>Configuración</h2>
+    </div>
+    <div class="card-body">
+      <div class="config-row">
+        <label for="intervalo">Intervalo entre tomas</label>
+        <select id="intervalo">
+          <option value="2">2 meses</option>
+          <option value="3" selected>3 meses</option>
+          <option value="4">4 meses</option>
+          <option value="6">6 meses</option>
+        </select>
+        <span class="config-hint">Estándar ICBF: 3 meses</span>
+      </div>
+    </div>
+  </div>
+
+  <!-- BOTÓN PROCESAR -->
+  <button class="btn-run" id="btn-run" onclick="procesar()">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+      <polygon points="5,3 19,12 5,21"></polygon>
+    </svg>
+    Generar Informes
+  </button>
+
+  <!-- PROGRESO -->
+  <div class="card" id="progress-section">
+    <div class="card-body">
+      <div class="progress-bar-wrap">
+        <div class="progress-bar indeterminate" id="progress-bar"></div>
+      </div>
+      <div class="progress-msg" id="progress-msg">Subiendo archivos…</div>
+    </div>
+  </div>
+
+  <!-- ERROR -->
+  <div id="error-section">
+    <div class="error-box">
+      <span style="font-size:18px">⚠</span>
+      <div>
+        <strong>Error al procesar</strong>
+        <span id="error-msg"></span>
+      </div>
+    </div>
+  </div>
+
+  <!-- RESULTADOS -->
+  <div id="result-section">
+    <div class="card">
+      <div class="card-header">
+        <div class="step-badge" style="background: var(--success)">✓</div>
+        <h2>Resultados</h2>
+      </div>
+      <div class="card-body">
+
+        <div class="section-divider">resumen por contrato</div>
+        <div id="result-content"></div>
+
+        <div class="action-row" style="margin-top: 20px;">
+          <a class="btn-download" id="btn-download" href="#" download>
+            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+              <polyline points="7,10 12,15 17,10"></polyline>
+              <line x1="12" y1="15" x2="12" y2="3"></line>
+            </svg>
+            Descargar Informes (.zip)
+          </a>
+          <button class="btn-reset" onclick="resetForm()">Nuevo análisis</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</main>
+
+<script>
+  // ── RELOJ ──
+  function tick() {
+    const now = new Date();
+    document.getElementById('clock').textContent =
+      now.toLocaleDateString('es-CO') + '  ' +
+      now.toLocaleTimeString('es-CO', {hour:'2-digit', minute:'2-digit'});
+  }
+  tick(); setInterval(tick, 30000);
+
+  // ── MODO ──
+  let modoActual = 'basico';
+  function setModo(modo) {
+    modoActual = modo;
+    document.getElementById('modo-basico-label').classList.toggle('active', modo === 'basico');
+    document.getElementById('modo-completo-label').classList.toggle('active', modo === 'completo');
+    const rowActivos = document.getElementById('row-activos');
+    const badge = document.getElementById('badge-activos');
+    if (modo === 'completo') {
+      rowActivos.classList.add('enabled');
+      badge.textContent = 'Requerido';
+      badge.className = 'badge-requerido';
+    } else {
+      rowActivos.classList.remove('enabled');
+      badge.textContent = 'Opcional';
+      badge.className = 'badge-opcional';
+    }
+  }
+
+  // ── NOMBRE ARCHIVO ──
+  function setFileName(input, targetId) {
+    const el = document.getElementById(targetId);
+    el.textContent = input.files[0] ? input.files[0].name : 'Sin archivo';
+  }
+
+  // ── SHOW/HIDE ──
+  function show(id) { document.getElementById(id).style.display = 'block'; }
+  function hide(id) { document.getElementById(id).style.display = 'none'; }
+  function setProgress(msg) { document.getElementById('progress-msg').textContent = msg; }
+
+  // ── PROCESAR ──
+  async function procesar() {
+    const fileGeneral  = document.querySelector('#row-general input').files[0];
+    const fileGestante = document.querySelector('#row-gestante input').files[0];
+    const fileActivos  = document.getElementById('input-activos').files[0];
+    const intervalo    = document.getElementById('intervalo').value;
+
+    if (!fileGeneral || !fileGestante) {
+      mostrarError('Debes cargar los archivos General y Gestante/Lactante.');
+      return;
+    }
+    if (modoActual === 'completo' && !fileActivos) {
+      mostrarError('El modo Completo requiere el archivo de Beneficiarios Activos.');
+      return;
+    }
+
+    hide('error-section');
+    hide('result-section');
+    show('progress-section');
+    document.getElementById('btn-run').disabled = true;
+    setProgress('Subiendo archivos…');
+
+    const fd = new FormData();
+    fd.append('modo', modoActual);
+    fd.append('general', fileGeneral);
+    fd.append('gestante', fileGestante);
+    fd.append('intervalo', intervalo);
+    if (fileActivos) fd.append('activos', fileActivos);
+
+    try {
+      setProgress('Procesando datos…');
+      const resp = await fetch('/procesar', { method: 'POST', body: fd });
+      const data = await resp.json();
+
+      if (!resp.ok) {
+        throw new Error(data.detail || 'Error desconocido del servidor.');
+      }
+
+      setProgress('Generando archivos Excel…');
+      mostrarResultados(data);
+
+    } catch (err) {
+      mostrarError(err.message);
+    } finally {
+      hide('progress-section');
+      document.getElementById('btn-run').disabled = false;
+    }
+  }
+
+  // ── RESULTADOS ──
+  function mostrarResultados(data) {
+    const container = document.getElementById('result-content');
+
+    // Agrupar por contrato
+    const porContrato = {};
+    for (const r of data.resumen) {
+      if (!porContrato[r.contrato]) porContrato[r.contrato] = {};
+      porContrato[r.contrato][r.tipo] = r;
+    }
+
+    let html = '';
+    for (const [contrato, tipos] of Object.entries(porContrato)) {
+      const g = tipos.general || {};
+      const e = tipos.gestante || {};
+
+      html += `
+        <div style="margin-bottom:24px;">
+          <div style="font-size:11px; color:var(--muted); font-family:var(--mono);
+                      margin-bottom:10px; letter-spacing:0.05em;">
+            CONTRATO ${contrato}
+          </div>
+          <div class="result-grid">
+            <div class="stat-box">
+              <div class="stat-val">${(g.vinculados||0) + (e.vinculados||0)}</div>
+              <div class="stat-label">Vinculados totales</div>
+            </div>
+            <div class="stat-box">
+              <div class="stat-val ${((g.faltantes||0)+(e.faltantes||0))>0 ? 'warning' : ''}">
+                ${(g.faltantes||0) + (e.faltantes||0)}
+              </div>
+              <div class="stat-label">Tomas faltantes</div>
+            </div>
+            <div class="stat-box">
+              <div class="stat-val ${((g.alertas||0)+(e.alertas||0))>0 ? 'danger' : ''}">
+                ${(g.alertas||0) + (e.alertas||0)}
+              </div>
+              <div class="stat-label">Alertas nutricionales</div>
+            </div>
+          </div>
+
+          <div class="result-table-wrap">
+            <table class="result-table">
+              <thead>
+                <tr>
+                  <th>Tipo</th>
+                  <th>Unidades</th>
+                  <th>Vinculados</th>
+                  <th>Tomas faltantes</th>
+                  <th>Alertas</th>
+                  <th>Archivo</th>
+                </tr>
+              </thead>
+              <tbody>
+                ${renderFila('General', g, data, contrato, 'general')}
+                ${renderFila('Gestante / Lactante', e, data, contrato, 'gestante')}
+              </tbody>
+            </table>
+          </div>
+        </div>`;
+    }
+
+    container.innerHTML = html;
+
+    const btnDl = document.getElementById('btn-download');
+    btnDl.href = data.descarga;
+    if (data.archivos.length === 1) {
+      btnDl.textContent = `⬇  Descargar ${data.archivos[0]}`;
+    }
+
+    show('result-section');
+  }
+
+  function renderFila(label, r, data, contrato, tipo) {
+    if (!r || Object.keys(r).length === 0) return '';
+    const chip = r.alertas > 0
+      ? `<span class="chip chip-danger">${r.alertas} alerta${r.alertas>1?'s':''}</span>`
+      : `<span class="chip chip-ok">Sin alertas</span>`;
+    const chipF = r.faltantes > 0
+      ? `<span class="chip chip-warn">${r.faltantes}</span>`
+      : `<span class="chip chip-ok">0</span>`;
+    const archivo = data.archivos.find(a => a.includes(tipo.toUpperCase()) && a.includes(contrato)) || '';
+    const link = archivo
+      ? `<a href="/descargar/${data.job_id}/${archivo}" style="color:var(--accent);font-family:var(--mono);font-size:11px;">${archivo}</a>`
+      : '—';
+    return `<tr>
+      <td style="font-family:var(--sans);font-weight:500">${label}</td>
+      <td>${r.unidades||0}</td>
+      <td>${r.vinculados||0}</td>
+      <td>${chipF}</td>
+      <td>${chip}</td>
+      <td>${link}</td>
+    </tr>`;
+  }
+
+  function mostrarError(msg) {
+    document.getElementById('error-msg').textContent = msg;
+    show('error-section');
+    hide('progress-section');
+  }
+
+  function resetForm() {
+    hide('result-section');
+    hide('error-section');
+    document.querySelectorAll('input[type="file"]').forEach(i => i.value = '');
+    document.querySelectorAll('.file-name').forEach(el => el.textContent = 'Sin archivo');
+    document.getElementById('intervalo').value = '3';
+    setModo('basico');
+    document.querySelector('input[name="modo"][value="basico"]').checked = true;
+  }
+</script>
+
+</body>
+</html>

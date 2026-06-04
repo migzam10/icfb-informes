@@ -1,0 +1,17 @@
+services:
+  icbf-informes:
+    build: .
+    container_name: icbf-informes
+    restart: unless-stopped
+    ports:
+      - "8001:8000"
+    environment:
+      - TZ=America/Bogota
+    tmpfs:
+      - /tmp/icbf_uploads:size=500m
+      - /tmp/icbf_outputs:size=500m
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8001/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
