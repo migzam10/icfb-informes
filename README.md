@@ -46,10 +46,10 @@ docker compose up -d --build
 ### 4. Verificar que está corriendo
 ```bash
 docker compose ps
-curl http://localhost:8000/health
+curl http://localhost:8001/health
 ```
 
-La app queda disponible en: **http://localhost:8000**
+La app queda disponible en: **http://localhost:8001**
 
 ---
 
@@ -81,7 +81,7 @@ credentials-file: /root/.cloudflared/<UUID>.json
 
 ingress:
   - hostname: informes-icbf.tudominio.com
-    service: http://localhost:8000
+    service: http://localhost:8001
   - service: http_status:404
 ```
 

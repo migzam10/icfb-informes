@@ -635,6 +635,8 @@
 
   // ── MODO ──
   let modoActual = 'basico';
+  let zipBlob = null;
+
   function setModo(modo) {
     modoActual = modo;
     document.getElementById('modo-basico-label').classList.toggle('active', modo === 'basico');
@@ -679,6 +681,14 @@
       return;
     }
 
+    const MAX_MB = 30;
+    for (const f of [fileGeneral, fileGestante, fileActivos].filter(Boolean)) {
+      if (f.size > MAX_MB * 1024 * 1024) {
+        mostrarError(`El archivo "${f.name}" supera los ${MAX_MB} MB permitidos.`);
+        return;
+      }
+    }
+
     hide('error-section');
     hide('result-section');
     show('progress-section');
@@ -695,14 +705,17 @@
     try {
       setProgress('Procesando datos…');
       const resp = await fetch('/procesar', { method: 'POST', body: fd });
-      const data = await resp.json();
 
       if (!resp.ok) {
-        throw new Error(data.detail || 'Error desconocido del servidor.');
+        const err = await resp.json().catch(() => ({ detail: resp.statusText }));
+        throw new Error(err.detail || 'Error desconocido del servidor.');
       }
 
-      setProgress('Generando archivos Excel…');
-      mostrarResultados(data);
+      const resumenRaw = resp.headers.get('X-Resumen');
+      const resumen = resumenRaw ? JSON.parse(resumenRaw) : [];
+      zipBlob = await resp.blob();
+
+      mostrarResultados(resumen);
 
     } catch (err) {
       mostrarError(err.message);
@@ -713,12 +726,11 @@
   }
 
   // ── RESULTADOS ──
-  function mostrarResultados(data) {
+  function mostrarResultados(resumen) {
     const container = document.getElementById('result-content');
 
-    // Agrupar por contrato
     const porContrato = {};
-    for (const r of data.resumen) {
+    for (const r of resumen) {
       if (!porContrato[r.contrato]) porContrato[r.contrato] = {};
       porContrato[r.contrato][r.tipo] = r;
     }
@@ -762,12 +774,11 @@
                   <th>Vinculados</th>
                   <th>Tomas faltantes</th>
                   <th>Alertas</th>
-                  <th>Archivo</th>
                 </tr>
               </thead>
               <tbody>
-                ${renderFila('General', g, data, contrato, 'general')}
-                ${renderFila('Gestante / Lactante', e, data, contrato, 'gestante')}
+                ${renderFila('General', g)}
+                ${renderFila('Gestante / Lactante', e)}
               </tbody>
             </table>
           </div>
@@ -777,15 +788,20 @@
     container.innerHTML = html;
 
     const btnDl = document.getElementById('btn-download');
-    btnDl.href = data.descarga;
-    if (data.archivos.length === 1) {
-      btnDl.textContent = `⬇  Descargar ${data.archivos[0]}`;
-    }
+    btnDl.onclick = (ev) => {
+      ev.preventDefault();
+      const url = URL.createObjectURL(zipBlob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = 'informes_icbf.zip';
+      a.click();
+      URL.revokeObjectURL(url);
+    };
 
     show('result-section');
   }
 
-  function renderFila(label, r, data, contrato, tipo) {
+  function renderFila(label, r) {
     if (!r || Object.keys(r).length === 0) return '';
     const chip = r.alertas > 0
       ? `<span class="chip chip-danger">${r.alertas} alerta${r.alertas>1?'s':''}</span>`
@@ -793,17 +809,12 @@
     const chipF = r.faltantes > 0
       ? `<span class="chip chip-warn">${r.faltantes}</span>`
       : `<span class="chip chip-ok">0</span>`;
-    const archivo = data.archivos.find(a => a.includes(tipo.toUpperCase()) && a.includes(contrato)) || '';
-    const link = archivo
-      ? `<a href="/descargar/${data.job_id}/${archivo}" style="color:var(--accent);font-family:var(--mono);font-size:11px;">${archivo}</a>`
-      : '—';
     return `<tr>
       <td style="font-family:var(--sans);font-weight:500">${label}</td>
       <td>${r.unidades||0}</td>
       <td>${r.vinculados||0}</td>
       <td>${chipF}</td>
       <td>${chip}</td>
-      <td>${link}</td>
     </tr>`;
   }
 
@@ -821,6 +832,7 @@
     document.getElementById('intervalo').value = '3';
     setModo('basico');
     document.querySelector('input[name="modo"][value="basico"]').checked = true;
+    zipBlob = null;
   }
 </script>
 
