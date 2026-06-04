@@ -441,6 +441,32 @@
   }
   .error-box strong { display: block; margin-bottom: 4px; }
 
+  /* ── BOTÓN DESCARGA INDIVIDUAL ── */
+  .btn-dl-file {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 5px 10px;
+    background: var(--surface);
+    border: 1px solid var(--accent);
+    border-radius: var(--radius);
+    color: var(--accent);
+    font-family: var(--mono);
+    font-size: 11px;
+    font-weight: 500;
+    cursor: pointer;
+    white-space: nowrap;
+    transition: background 0.15s;
+  }
+  .btn-dl-file:hover { background: #f0f8f3; }
+
+  /* ── ALERTAS BREAKDOWN ── */
+  .alertas-list {
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+  }
+
   /* ── DIVIDER ── */
   .section-divider {
     font-size: 11px;
@@ -512,7 +538,7 @@
             <span class="file-sub">ICBFCUEGeneralPorToma.xlsx</span>
             <span class="file-name" id="name-general">Sin archivo</span>
           </div>
-          <span class="badge-requerido">Requerido</span>
+          <span class="badge-opcional" id="badge-general">Opcional</span>
           <input class="file-input" type="file" accept=".xlsx,.xls,.csv"
                  onchange="setFileName(this, 'name-general')">
         </div>
@@ -524,7 +550,7 @@
             <span class="file-sub">GestanteLactantePorToma.xlsx</span>
             <span class="file-name" id="name-gestante">Sin archivo</span>
           </div>
-          <span class="badge-requerido">Requerido</span>
+          <span class="badge-opcional" id="badge-gestante">Opcional</span>
           <input class="file-input" type="file" accept=".xlsx,.xls,.csv"
                  onchange="setFileName(this, 'name-gestante')">
         </div>
@@ -607,14 +633,6 @@
         <div id="result-content"></div>
 
         <div class="action-row" style="margin-top: 20px;">
-          <a class="btn-download" id="btn-download" href="#" download>
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
-              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
-              <polyline points="7,10 12,15 17,10"></polyline>
-              <line x1="12" y1="15" x2="12" y2="3"></line>
-            </svg>
-            Descargar Informes (.zip)
-          </a>
           <button class="btn-reset" onclick="resetForm()">Nuevo análisis</button>
         </div>
       </div>
@@ -633,31 +651,58 @@
   }
   tick(); setInterval(tick, 30000);
 
-  // ── MODO ──
+  // ── ESTADO ──
   let modoActual = 'basico';
-  let zipBlob = null;
+  let archivosData = [];
 
+  // Categorías "normales" — no se cuentan como alerta crítica en los stat-boxes
+  const CATS_NORMALES = new Set([
+    'Peso Adecuado para la Talla',
+    'IMC Adecuado para la Edad Gestacional'
+  ]);
+
+  // Color por categoría
+  const ALERTA_COLOR = {
+    'Desnutrición Aguda Severa':          'chip-danger',
+    'Desnutrición Aguda Moderada':         'chip-danger',
+    'Riesgo de Desnutrición Aguda':        'chip-warn',
+    'Bajo Peso para la Edad Gestacional':  'chip-danger',
+    'Obesidad':                            'chip-warn',
+    'Sobrepeso':                           'chip-warn',
+    'Riesgo de Sobrepeso':                 'chip-warn',
+    'Peso Adecuado para la Talla':         'chip-ok',
+    'IMC Adecuado para la Edad Gestacional': 'chip-ok',
+    'Sobrepeso para la Edad Gestacional':  'chip-warn',
+    'Obesidad para la Edad Gestacional':   'chip-warn',
+  };
+
+  // ── MODO ──
   function setModo(modo) {
     modoActual = modo;
     document.getElementById('modo-basico-label').classList.toggle('active', modo === 'basico');
     document.getElementById('modo-completo-label').classList.toggle('active', modo === 'completo');
+
+    const bgGeneral  = document.getElementById('badge-general');
+    const bgGestante = document.getElementById('badge-gestante');
     const rowActivos = document.getElementById('row-activos');
-    const badge = document.getElementById('badge-activos');
+    const bgActivos  = document.getElementById('badge-activos');
+
     if (modo === 'completo') {
+      bgGeneral.textContent  = 'Requerido'; bgGeneral.className  = 'badge-requerido';
+      bgGestante.textContent = 'Requerido'; bgGestante.className = 'badge-requerido';
       rowActivos.classList.add('enabled');
-      badge.textContent = 'Requerido';
-      badge.className = 'badge-requerido';
+      bgActivos.textContent = 'Requerido'; bgActivos.className = 'badge-requerido';
     } else {
+      bgGeneral.textContent  = 'Opcional'; bgGeneral.className  = 'badge-opcional';
+      bgGestante.textContent = 'Opcional'; bgGestante.className = 'badge-opcional';
       rowActivos.classList.remove('enabled');
-      badge.textContent = 'Opcional';
-      badge.className = 'badge-opcional';
+      bgActivos.textContent = 'Opcional'; bgActivos.className = 'badge-opcional';
     }
   }
 
   // ── NOMBRE ARCHIVO ──
   function setFileName(input, targetId) {
-    const el = document.getElementById(targetId);
-    el.textContent = input.files[0] ? input.files[0].name : 'Sin archivo';
+    document.getElementById(targetId).textContent = input.files[0] ? input.files[0].name : 'Sin archivo';
   }
 
   // ── SHOW/HIDE ──
@@ -672,12 +717,12 @@
     const fileActivos  = document.getElementById('input-activos').files[0];
     const intervalo    = document.getElementById('intervalo').value;
 
-    if (!fileGeneral || !fileGestante) {
-      mostrarError('Debes cargar los archivos General y Gestante/Lactante.');
+    if (modoActual === 'basico' && !fileGeneral && !fileGestante) {
+      mostrarError('Debes cargar al menos un archivo en Modo Básico.');
       return;
     }
-    if (modoActual === 'completo' && !fileActivos) {
-      mostrarError('El modo Completo requiere el archivo de Beneficiarios Activos.');
+    if (modoActual === 'completo' && (!fileGeneral || !fileGestante || !fileActivos)) {
+      mostrarError('El Modo Completo requiere los tres archivos.');
       return;
     }
 
@@ -697,26 +742,21 @@
 
     const fd = new FormData();
     fd.append('modo', modoActual);
-    fd.append('general', fileGeneral);
-    fd.append('gestante', fileGestante);
+    if (fileGeneral)  fd.append('general',  fileGeneral);
+    if (fileGestante) fd.append('gestante', fileGestante);
+    if (fileActivos)  fd.append('activos',  fileActivos);
     fd.append('intervalo', intervalo);
-    if (fileActivos) fd.append('activos', fileActivos);
 
     try {
       setProgress('Procesando datos…');
       const resp = await fetch('/procesar', { method: 'POST', body: fd });
-
       if (!resp.ok) {
         const err = await resp.json().catch(() => ({ detail: resp.statusText }));
         throw new Error(err.detail || 'Error desconocido del servidor.');
       }
-
-      const resumenRaw = resp.headers.get('X-Resumen');
-      const resumen = resumenRaw ? JSON.parse(resumenRaw) : [];
-      zipBlob = await resp.blob();
-
-      mostrarResultados(resumen);
-
+      const data = await resp.json();
+      archivosData = data.archivos;
+      mostrarResultados(archivosData);
     } catch (err) {
       mostrarError(err.message);
     } finally {
@@ -725,43 +765,76 @@
     }
   }
 
+  // ── DESCARGA INDIVIDUAL ──
+  function descargar(idx) {
+    const r = archivosData[idx];
+    const bytes = atob(r.data);
+    const arr = new Uint8Array(bytes.length);
+    for (let i = 0; i < bytes.length; i++) arr[i] = bytes.charCodeAt(i);
+    const blob = new Blob([arr], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href = url; a.download = r.filename; a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  // ── ALERTAS BREAKDOWN ──
+  function totalAlertasCriticas(alertas) {
+    return Object.entries(alertas || {})
+      .filter(([k]) => !CATS_NORMALES.has(k))
+      .reduce((s, [, v]) => s + v, 0);
+  }
+
+  function renderAlertasBreakdown(alertas) {
+    if (!alertas || Object.keys(alertas).length === 0) return '—';
+    const entries = Object.entries(alertas).filter(([, v]) => v > 0);
+    if (entries.length === 0) return '<span class="chip chip-ok">Sin datos</span>';
+    return '<div class="alertas-list">' +
+      entries.map(([cat, cnt]) => {
+        const cls = ALERTA_COLOR[cat] || 'chip';
+        return `<span class="chip ${cls}" style="font-size:10px">${cat}: ${cnt}</span>`;
+      }).join('') +
+      '</div>';
+  }
+
   // ── RESULTADOS ──
-  function mostrarResultados(resumen) {
+  function mostrarResultados(archivos) {
     const container = document.getElementById('result-content');
 
+    // Agrupar por contrato
     const porContrato = {};
-    for (const r of resumen) {
+    archivos.forEach((r, idx) => {
       if (!porContrato[r.contrato]) porContrato[r.contrato] = {};
-      porContrato[r.contrato][r.tipo] = r;
-    }
+      porContrato[r.contrato][r.tipo] = { ...r, _idx: idx };
+    });
 
     let html = '';
     for (const [contrato, tipos] of Object.entries(porContrato)) {
-      const g = tipos.general || {};
+      const g = tipos.general  || {};
       const e = tipos.gestante || {};
+
+      const totalVinc  = (g.vinculados || 0) + (e.vinculados || 0);
+      const totalFalt  = (g.faltantes  || 0) + (e.faltantes  || 0);
+      const totalAlert = totalAlertasCriticas(g.alertas) + totalAlertasCriticas(e.alertas);
 
       html += `
         <div style="margin-bottom:24px;">
-          <div style="font-size:11px; color:var(--muted); font-family:var(--mono);
-                      margin-bottom:10px; letter-spacing:0.05em;">
+          <div style="font-size:11px;color:var(--muted);font-family:var(--mono);
+                      margin-bottom:10px;letter-spacing:0.05em;">
             CONTRATO ${contrato}
           </div>
           <div class="result-grid">
             <div class="stat-box">
-              <div class="stat-val">${(g.vinculados||0) + (e.vinculados||0)}</div>
+              <div class="stat-val">${totalVinc}</div>
               <div class="stat-label">Vinculados totales</div>
             </div>
             <div class="stat-box">
-              <div class="stat-val ${((g.faltantes||0)+(e.faltantes||0))>0 ? 'warning' : ''}">
-                ${(g.faltantes||0) + (e.faltantes||0)}
-              </div>
+              <div class="stat-val ${totalFalt > 0 ? 'warning' : ''}">${totalFalt}</div>
               <div class="stat-label">Tomas faltantes</div>
             </div>
             <div class="stat-box">
-              <div class="stat-val ${((g.alertas||0)+(e.alertas||0))>0 ? 'danger' : ''}">
-                ${(g.alertas||0) + (e.alertas||0)}
-              </div>
-              <div class="stat-label">Alertas nutricionales</div>
+              <div class="stat-val ${totalAlert > 0 ? 'danger' : ''}">${totalAlert}</div>
+              <div class="stat-label">Con alerta crítica</div>
             </div>
           </div>
 
@@ -773,7 +846,8 @@
                   <th>Unidades</th>
                   <th>Vinculados</th>
                   <th>Tomas faltantes</th>
-                  <th>Alertas</th>
+                  <th>Estado nutricional</th>
+                  <th>Descargar</th>
                 </tr>
               </thead>
               <tbody>
@@ -786,35 +860,21 @@
     }
 
     container.innerHTML = html;
-
-    const btnDl = document.getElementById('btn-download');
-    btnDl.onclick = (ev) => {
-      ev.preventDefault();
-      const url = URL.createObjectURL(zipBlob);
-      const a = document.createElement('a');
-      a.href = url;
-      a.download = 'informes_icbf.zip';
-      a.click();
-      URL.revokeObjectURL(url);
-    };
-
     show('result-section');
   }
 
   function renderFila(label, r) {
     if (!r || Object.keys(r).length === 0) return '';
-    const chip = r.alertas > 0
-      ? `<span class="chip chip-danger">${r.alertas} alerta${r.alertas>1?'s':''}</span>`
-      : `<span class="chip chip-ok">Sin alertas</span>`;
     const chipF = r.faltantes > 0
       ? `<span class="chip chip-warn">${r.faltantes}</span>`
       : `<span class="chip chip-ok">0</span>`;
     return `<tr>
       <td style="font-family:var(--sans);font-weight:500">${label}</td>
-      <td>${r.unidades||0}</td>
-      <td>${r.vinculados||0}</td>
+      <td>${r.unidades  || 0}</td>
+      <td>${r.vinculados || 0}</td>
       <td>${chipF}</td>
-      <td>${chip}</td>
+      <td>${renderAlertasBreakdown(r.alertas)}</td>
+      <td><button class="btn-dl-file" onclick="descargar(${r._idx})">↓ ${r.filename}</button></td>
     </tr>`;
   }
 
@@ -832,7 +892,7 @@
     document.getElementById('intervalo').value = '3';
     setModo('basico');
     document.querySelector('input[name="modo"][value="basico"]').checked = true;
-    zipBlob = null;
+    archivosData = [];
   }
 </script>
 

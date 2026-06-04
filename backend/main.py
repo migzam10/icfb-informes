@@ -1,21 +1,20 @@
 """
 ICBF Informes - Backend FastAPI
 Modos:
-  - basico:    solo General + Gestante (sin archivo de activos)
+  - basico:    General y/o Gestante de forma independiente (al menos uno)
   - completo:  General + Gestante + BeneficiariosPIActivos (análisis de déficit)
 """
 
+import base64
 import io
-import json
 import math
 import warnings
-import zipfile
 from datetime import datetime
 
 import pandas as pd
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
 
 app = FastAPI(title="ICBF Informes")
@@ -25,29 +24,43 @@ app.add_middleware(
     allow_origins=["*"],
     allow_methods=["*"],
     allow_headers=["*"],
-    expose_headers=["X-Resumen"],
 )
+
+# Categorías en orden de presentación, usadas para contar y ordenar la hoja
+CATEGORIAS = {
+    "general": [
+        "Obesidad",
+        "Sobrepeso",
+        "Riesgo de Sobrepeso",
+        "Peso Adecuado para la Talla",
+        "Riesgo de Desnutrición Aguda",
+        "Desnutrición Aguda Moderada",
+        "Desnutrición Aguda Severa",
+    ],
+    "gestante": [
+        "Bajo Peso para la Edad Gestacional",
+        "IMC Adecuado para la Edad Gestacional",
+        "Sobrepeso para la Edad Gestacional",
+        "Obesidad para la Edad Gestacional",
+    ],
+}
 
 PERFIL = {
     "general": {
-        "col_doc":        "Numero Documento Beneficiario",
-        "col_diag":       "ESTADO PESO TALLA",
-        "patron_alerta":  r"desnutrici[oó]n",
-        "hoja_alerta":    "Alerta Desnutricion",
-        "msg_sin_alerta": "Sin casos de desnutricion en la ultima toma",
-        "tipos_activos":  ["MENOR DE SEIS MESES", "NIÑO O NIÑA ENTRE 6 MESES Y 5 AÑOS Y 11 MESES"],
-        "col_fecha":      "FECHA VALORACION NURICIONAL",
-        "hoja_excel":     "ICBFCUEGeneralPorToma",
+        "col_doc":       "Numero Documento Beneficiario",
+        "col_diag":      "ESTADO PESO TALLA",
+        "hoja_alerta":   "Alerta Desnutricion",
+        "tipos_activos": ["MENOR DE SEIS MESES", "NIÑO O NIÑA ENTRE 6 MESES Y 5 AÑOS Y 11 MESES"],
+        "col_fecha":     "FECHA VALORACION NURICIONAL",
+        "hoja_excel":    "ICBFCUEGeneralPorToma",
     },
     "gestante": {
-        "col_doc":        "Número documento beneficiario",
-        "col_diag":       "EST.NUTR. GESTANTE",
-        "patron_alerta":  r"bajo peso|obesidad|sobrepeso",
-        "hoja_alerta":    "Alerta Nutricional",
-        "msg_sin_alerta": "Sin alertas nutricionales en la ultima toma",
-        "tipos_activos":  ["PERSONA GESTANTE"],
-        "col_fecha":      "FECHA VALORACION NUTRICIONAL",
-        "hoja_excel":     "GestanteLactantePorToma",
+        "col_doc":       "Número documento beneficiario",
+        "col_diag":      "EST.NUTR. GESTANTE",
+        "hoja_alerta":   "Alerta Nutricional",
+        "tipos_activos": ["PERSONA GESTANTE"],
+        "col_fecha":     "FECHA VALORACION NUTRICIONAL",
+        "hoja_excel":    "GestanteLactantePorToma",
     },
 }
 
@@ -84,7 +97,9 @@ def procesar(
     act_bytes: bytes | None, act_fn: str | None,
     tipo: str, intervalo: int,
 ) -> list[dict]:
-    p = PERFIL[tipo]
+    p    = PERFIL[tipo]
+    cats = CATEGORIAS[tipo]
+
     df = leer_bytes(nut_bytes, nut_fn, preferir_hoja=p["hoja_excel"])
     df.columns = [norm(c) for c in df.columns]
 
@@ -126,20 +141,22 @@ def procesar(
         df_c   = df[df[COL_CONTRATO] == contrato]
         df_ult = df_ultimo[df_ultimo[COL_CONTRATO] == contrato]
 
+        # ── Hoja 1: Usuarios por unidad ──────────────────────────────
         hoja_unidades = (
             df_c.groupby(COL_UNIDAD)[COL_DOC]
             .nunique().reset_index()
             .rename(columns={COL_DOC: "TOTAL USUARIOS UNICOS"})
         )
 
+        # ── Hoja 2: Tomas faltantes ───────────────────────────────────
         if act_bytes:
             df_act = leer_bytes(act_bytes, act_fn)
             tipos_u = [t.upper() for t in p["tipos_activos"]]
             df_act = df_act[df_act["Nombre Tipo de beneficiario"].str.strip().str.upper().isin(tipos_u)].copy()
             df_act = df_act[df_act["Número del Contrato"].str.strip() == str(contrato).strip()].copy()
-            df_act["_doc"]      = df_act["Documento del beneficiario"].str.strip()
-            df_act["_vinc"]     = pd.to_datetime(df_act["Fecha de vinculación del beneficiario"], errors="coerce", dayfirst=True)
-            df_act["_meses"]    = (ahora.year - df_act["_vinc"].dt.year) * 12 + (ahora.month - df_act["_vinc"].dt.month)
+            df_act["_doc"]       = df_act["Documento del beneficiario"].str.strip()
+            df_act["_vinc"]      = pd.to_datetime(df_act["Fecha de vinculación del beneficiario"], errors="coerce", dayfirst=True)
+            df_act["_meses"]     = (ahora.year - df_act["_vinc"].dt.year) * 12 + (ahora.month - df_act["_vinc"].dt.month)
             df_act["_esperadas"] = df_act["_meses"].apply(lambda m: tomas_esperadas(m, intervalo) if pd.notna(m) else 0)
             conteo = df_c.groupby(COL_DOC).size().reset_index(name="_reales")
             df_act = df_act.merge(conteo, left_on="_doc", right_on=COL_DOC, how="left")
@@ -150,16 +167,18 @@ def procesar(
             for _, row in faltantes_src.iterrows():
                 doc = row["_doc"]
                 reg = df_ult[df_ult[COL_DOC] == doc]
+                fecha_val = reg[COL_FECHA].values[0] if not reg.empty and COL_FECHA in reg.columns else None
+                fecha_str = pd.Timestamp(fecha_val).strftime("%Y-%m-%d") if fecha_val is not None and pd.notna(fecha_val) else "SIN TOMA"
                 filas.append({
-                    "UNIDAD":             reg[COL_UNIDAD].values[0] if not reg.empty else row.get("Nombre de la unidad de servicio", ""),
-                    "DOCUMENTO":          doc,
-                    "NOMBRE":             reg[COL_NOMBRE].values[0] if not reg.empty and COL_NOMBRE in reg.columns else row.get("Primer Nombre del beneficiario", ""),
-                    "APELLIDO":           reg[COL_APELLIDO].values[0] if not reg.empty and COL_APELLIDO in reg.columns else row.get("Primer apellido del beneficiario", ""),
-                    "TOMAS REALIZADAS":   int(row["_reales"]),
-                    "TOMAS ESPERADAS":    int(row["_esperadas"]),
-                    "MESES VINCULADO":    int(row["_meses"]) if pd.notna(row["_meses"]) else 0,
-                    "ULTIMO DIAGNOSTICO": reg[COL_DIAG].values[0] if not reg.empty and COL_DIAG in reg.columns else "SIN TOMA",
-                    "MOTIVO":             "Sin toma registrada" if row["_reales"] == 0 else "Tomas insuficientes",
+                    "UNIDAD":            reg[COL_UNIDAD].values[0] if not reg.empty else row.get("Nombre de la unidad de servicio", ""),
+                    "DOCUMENTO":         doc,
+                    "NOMBRE":            reg[COL_NOMBRE].values[0] if not reg.empty and COL_NOMBRE in reg.columns else row.get("Primer Nombre del beneficiario", ""),
+                    "APELLIDO":          reg[COL_APELLIDO].values[0] if not reg.empty and COL_APELLIDO in reg.columns else row.get("Primer apellido del beneficiario", ""),
+                    "TOMAS REALIZADAS":  int(row["_reales"]),
+                    "TOMAS ESPERADAS":   int(row["_esperadas"]),
+                    "MESES VINCULADO":   int(row["_meses"]) if pd.notna(row["_meses"]) else 0,
+                    "FECHA ULTIMA TOMA": fecha_str,
+                    "MOTIVO":            "Sin toma registrada" if row["_reales"] == 0 else "Tomas insuficientes",
                 })
             df_faltantes = pd.DataFrame(filas)
         else:
@@ -178,17 +197,33 @@ def procesar(
                     if diff_hoy >= intervalo:
                         ids_faltantes.add(usuario)
 
-            cols_f = [c for c in [COL_UNIDAD, COL_DOC, COL_NOMBRE, COL_APELLIDO, COL_DIAG] if c in df_ult.columns]
+            cols_f = [c for c in [COL_UNIDAD, COL_DOC, COL_NOMBRE, COL_APELLIDO, COL_FECHA] if c in df_ult.columns]
             df_faltantes = df_ult[df_ult[COL_DOC].isin(ids_faltantes)][cols_f].copy() if ids_faltantes else pd.DataFrame(columns=cols_f)
+            if not df_faltantes.empty and COL_FECHA in df_faltantes.columns:
+                df_faltantes[COL_FECHA] = df_faltantes[COL_FECHA].dt.strftime("%Y-%m-%d")
 
+        # ── Hoja 3: Estado nutricional (todos los últimos registros) ──
         if COL_DIAG in df_ult.columns:
-            mask = df_ult[COL_DIAG].str.contains(p["patron_alerta"], case=False, na=False, regex=True)
             cols_a = [c for c in [COL_UNIDAD, COL_DOC, COL_NOMBRE, COL_APELLIDO, COL_DIAG, COL_FECHA] if c in df_ult.columns]
-            df_alerta = df_ult[mask][cols_a].copy()
+            df_alerta = df_ult[df_ult[COL_DIAG].notna()][cols_a].copy()
             if COL_FECHA in df_alerta.columns:
                 df_alerta[COL_FECHA] = df_alerta[COL_FECHA].dt.strftime("%Y-%m-%d")
+
+            # Ordenar por el orden de categorías definido
+            cat_order = {norm(c): i for i, c in enumerate(cats)}
+            df_alerta["_ord"] = df_alerta[COL_DIAG].apply(lambda x: cat_order.get(norm(str(x)), len(cats)))
+            df_alerta = df_alerta.sort_values("_ord").drop(columns=["_ord"])
+
+            # Contar por categoría (comparación normalizada)
+            diag_norm = df_ult[COL_DIAG].apply(lambda x: norm(str(x)) if pd.notna(x) else "")
+            alertas_conteo = {cat: int((diag_norm == norm(cat)).sum()) for cat in cats}
+            # Capturar valores que no corresponden a ninguna categoría conocida
+            otros = int(df_ult[COL_DIAG].notna().sum()) - sum(alertas_conteo.values())
+            if otros > 0:
+                alertas_conteo["Otro"] = otros
         else:
             df_alerta = pd.DataFrame()
+            alertas_conteo = {cat: 0 for cat in cats}
 
         buf = io.BytesIO()
         with pd.ExcelWriter(buf, engine="openpyxl") as writer:
@@ -197,7 +232,7 @@ def procesar(
              else pd.DataFrame({"MENSAJE": ["Sin tomas faltantes registradas"]})).to_excel(
                 writer, sheet_name="Tomas Faltantes", index=False)
             (df_alerta if not df_alerta.empty
-             else pd.DataFrame({"MENSAJE": [p["msg_sin_alerta"]]})).to_excel(
+             else pd.DataFrame({"MENSAJE": ["Sin registros nutricionales"]})).to_excel(
                 writer, sheet_name=p["hoja_alerta"], index=False)
         buf.seek(0)
 
@@ -206,7 +241,7 @@ def procesar(
             "tipo":      tipo,
             "vinculados": int(df_c[COL_DOC].nunique()),
             "faltantes":  len(df_faltantes),
-            "alertas":    len(df_alerta),
+            "alertas":    alertas_conteo,
             "unidades":   len(hoja_unidades),
             "filename":   f"Informe_{tipo.upper()}_Contrato_{contrato}.xlsx",
             "bytes":      buf.read(),
@@ -227,56 +262,62 @@ def health():
 @app.post("/procesar")
 async def procesar_archivos(
     modo: str = Form(...),
-    general: UploadFile = File(...),
-    gestante: UploadFile = File(...),
+    general: UploadFile = File(None),
+    gestante: UploadFile = File(None),
     activos: UploadFile = File(None),
     intervalo: int = Form(3),
 ):
     if modo not in ("basico", "completo"):
         raise HTTPException(400, "modo debe ser 'basico' o 'completo'")
 
-    general_bytes  = await general.read()
-    gestante_bytes = await gestante.read()
-    act_bytes = (await activos.read()) if activos and activos.filename else None
-    act_fn    = activos.filename if activos and activos.filename else None
+    def tiene(f: UploadFile) -> bool:
+        return f is not None and bool(f.filename)
 
-    for nombre, data in [("general", general_bytes), ("gestante", gestante_bytes)]:
-        if len(data) > MAX_UPLOAD_MB * 1024 * 1024:
-            raise HTTPException(413, f"El archivo {nombre} supera los {MAX_UPLOAD_MB}MB permitidos.")
-    if act_bytes and len(act_bytes) > MAX_UPLOAD_MB * 1024 * 1024:
-        raise HTTPException(413, f"El archivo de activos supera los {MAX_UPLOAD_MB}MB permitidos.")
+    general_bytes  = (await general.read())  if tiene(general)  else None
+    gestante_bytes = (await gestante.read()) if tiene(gestante) else None
+    act_bytes      = (await activos.read())  if tiene(activos)  else None
+    act_fn         = activos.filename        if tiene(activos)  else None
 
-    if modo == "completo" and not act_bytes:
-        raise HTTPException(400, "Modo completo requiere el archivo de activos.")
+    if modo == "completo":
+        if not general_bytes or not gestante_bytes or not act_bytes:
+            raise HTTPException(400, "Modo completo requiere los tres archivos.")
+    else:
+        if not general_bytes and not gestante_bytes:
+            raise HTTPException(400, "Debes cargar al menos un archivo (General o Gestante/Lactante).")
+
+    for nombre, data in [("general", general_bytes), ("gestante", gestante_bytes), ("activos", act_bytes)]:
+        if data and len(data) > MAX_UPLOAD_MB * 1024 * 1024:
+            raise HTTPException(413, f"El archivo {nombre} supera los {MAX_UPLOAD_MB} MB permitidos.")
 
     try:
         todos = []
-        for tipo, data, fn in [
-            ("general",  general_bytes,  general.filename),
-            ("gestante", gestante_bytes, gestante.filename),
-        ]:
+        pares = []
+        if general_bytes:
+            pares.append(("general",  general_bytes,  general.filename))
+        if gestante_bytes:
+            pares.append(("gestante", gestante_bytes, gestante.filename))
+        for tipo, data, fn in pares:
             todos.extend(procesar(data, fn, act_bytes, act_fn, tipo, intervalo))
     except ValueError as e:
         raise HTTPException(422, str(e))
     except Exception as e:
         raise HTTPException(500, f"Error procesando archivos: {str(e)}")
 
-    zip_buf = io.BytesIO()
-    with zipfile.ZipFile(zip_buf, "w", zipfile.ZIP_DEFLATED) as zf:
-        for r in todos:
-            zf.writestr(r["filename"], r["bytes"])
-    zip_buf.seek(0)
-
-    resumen = [{k: v for k, v in r.items() if k != "bytes"} for r in todos]
-
-    return StreamingResponse(
-        zip_buf,
-        media_type="application/zip",
-        headers={
-            "Content-Disposition": "attachment; filename=informes_icbf.zip",
-            "X-Resumen": json.dumps(resumen, ensure_ascii=False),
-        },
-    )
+    return JSONResponse({
+        "archivos": [
+            {
+                "filename":  r["filename"],
+                "contrato":  r["contrato"],
+                "tipo":      r["tipo"],
+                "vinculados": r["vinculados"],
+                "faltantes":  r["faltantes"],
+                "alertas":    r["alertas"],
+                "unidades":   r["unidades"],
+                "data":       base64.b64encode(r["bytes"]).decode("ascii"),
+            }
+            for r in todos
+        ]
+    })
 
 
 app.mount("/", StaticFiles(directory="/app/frontend", html=True), name="frontend")
