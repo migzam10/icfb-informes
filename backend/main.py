@@ -16,6 +16,9 @@ from fastapi import FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from fastapi.staticfiles import StaticFiles
+from openpyxl import Workbook
+from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
+from openpyxl.utils import get_column_letter
 
 app = FastAPI(title="ICBF Informes")
 
@@ -149,6 +152,7 @@ def procesar(
         )
 
         # ── Hoja 2: Tomas faltantes ───────────────────────────────────
+        df_sin_toma = None
         if act_bytes:
             df_act = leer_bytes(act_bytes, act_fn)
             tipos_u = [t.upper() for t in p["tipos_activos"]]
@@ -181,6 +185,16 @@ def procesar(
                     "MOTIVO":            "Sin toma registrada" if row["_reales"] == 0 else "Tomas insuficientes",
                 })
             df_faltantes = pd.DataFrame(filas)
+
+            filas_st = []
+            for _, row in df_act[df_act["_reales"] == 0].iterrows():
+                filas_st.append({
+                    "UNIDAD":    row.get("Nombre de la unidad de servicio", ""),
+                    "DOCUMENTO": row["_doc"],
+                    "NOMBRE":    row.get("Primer Nombre del beneficiario", ""),
+                    "APELLIDO":  row.get("Primer apellido del beneficiario", ""),
+                })
+            df_sin_toma = pd.DataFrame(filas_st)
         else:
             ids_faltantes = set()
             for usuario, grupo in df_ord[df_ord[COL_CONTRATO] == contrato].groupby(COL_DOC):
@@ -234,6 +248,10 @@ def procesar(
             (df_alerta if not df_alerta.empty
              else pd.DataFrame({"MENSAJE": ["Sin registros nutricionales"]})).to_excel(
                 writer, sheet_name=p["hoja_alerta"], index=False)
+            if df_sin_toma is not None:
+                (df_sin_toma if not df_sin_toma.empty
+                 else pd.DataFrame({"MENSAJE": ["Todos los beneficiarios tienen tomas registradas"]})).to_excel(
+                    writer, sheet_name="Sin Tomas Registradas", index=False)
         buf.seek(0)
 
         resultados.append({
@@ -243,11 +261,212 @@ def procesar(
             "faltantes":  len(df_faltantes),
             "alertas":    alertas_conteo,
             "unidades":   len(hoja_unidades),
+            "sin_toma":   len(df_sin_toma) if df_sin_toma is not None else 0,
             "filename":   f"Informe_{tipo.upper()}_Contrato_{contrato}.xlsx",
             "bytes":      buf.read(),
         })
 
     return resultados
+
+
+# ─────────────────────────────────────────────
+# REPORTE BENEFICIARIOS
+# ─────────────────────────────────────────────
+
+def generar_reporte(data_bytes: bytes, filename: str) -> tuple[bytes, list[dict], dict]:
+    df = leer_bytes(data_bytes, filename, preferir_hoja="ICBFCUEBeneficiariosPIActivosRe")
+
+    def find_col(*keywords):
+        for kw in keywords:
+            for c in df.columns:
+                if kw.lower() in c.lower():
+                    return c
+        return None
+
+    col_uds  = find_col("nombre de la unidad de servicio")
+    col_tipo = find_col("nombre tipo de beneficiario")
+    col_sexo = find_col("sexo del beneficiario")
+    col_edad = find_col("edad del beneficiario")
+
+    for label, col in [("Unidad de servicio", col_uds), ("Tipo beneficiario", col_tipo),
+                        ("Sexo", col_sexo), ("Edad", col_edad)]:
+        if col is None:
+            raise ValueError(f"Columna no encontrada: '{label}'")
+
+    df[col_edad] = pd.to_numeric(df[col_edad], errors="coerce").fillna(0)
+    df[col_tipo] = df[col_tipo].str.strip().str.upper()
+    df[col_sexo] = df[col_sexo].str.strip().str.upper()
+
+    TIPO_MENOR = "MENOR DE SEIS MESES"
+    TIPO_NINO  = "NIÑO O NIÑA ENTRE 6 MESES Y 5 AÑOS Y 11 MESES"
+    TIPO_GEST  = "PERSONA GESTANTE"
+
+    udses = sorted(df[col_uds].dropna().unique())
+    filas = []
+
+    for uds in udses:
+        dfu = df[df[col_uds] == uds]
+
+        menor = dfu[dfu[col_tipo] == TIPO_MENOR]
+        m_h   = int((menor[col_sexo] == "HOMBRE").sum())
+        m_m   = int((menor[col_sexo] == "MUJER").sum())
+        m_tot = m_h + m_m
+
+        nino    = dfu[dfu[col_tipo] == TIPO_NINO]
+        nh      = nino[nino[col_sexo] == "HOMBRE"]
+        nm      = nino[nino[col_sexo] == "MUJER"]
+        n_h_lt2 = int((nh[col_edad] < 2).sum())
+        n_h_2a5 = int((nh[col_edad] >= 2).sum())
+        n_h_tot = n_h_lt2 + n_h_2a5
+        n_m_lt2 = int((nm[col_edad] < 2).sum())
+        n_m_2a5 = int((nm[col_edad] >= 2).sum())
+        n_m_tot = n_m_lt2 + n_m_2a5
+        n_tot   = n_h_tot + n_m_tot
+
+        gest  = dfu[dfu[col_tipo] == TIPO_GEST]
+        g_tot = len(gest)
+
+        total = m_tot + n_tot + g_tot
+
+        filas.append({
+            "uds": uds,
+            "m_h": m_h, "m_m": m_m, "m_tot": m_tot,
+            "n_h_lt2": n_h_lt2, "n_h_2a5": n_h_2a5, "n_h_tot": n_h_tot,
+            "n_m_lt2": n_m_lt2, "n_m_2a5": n_m_2a5, "n_m_tot": n_m_tot,
+            "n_tot": n_tot,
+            "g_tot": g_tot,
+            "total": total,
+        })
+
+    keys = [k for k in filas[0] if k != "uds"]
+    totales = {k: sum(f[k] for f in filas) for k in keys}
+    totales["uds"] = "Total general"
+
+    # ── Construir Excel ────────────────────────────────────────────
+    wb  = Workbook()
+    ws  = wb.active
+    ws.title = "Reporte"
+
+    C_GREEN1 = "0A5C36"
+    C_GREEN2 = "1A6B3A"
+    C_GREEN3 = "2E7D52"
+    C_LIGHT  = "E8F5EE"
+    C_HEADER = "F0F2EE"
+
+    def hfill(hex_color):
+        return PatternFill("solid", fgColor=hex_color)
+
+    def hfont(bold=True, color="FFFFFF", size=9):
+        return Font(bold=bold, color=color, size=size)
+
+    thin   = Side(style="thin", color="D6D3CC")
+    border = Border(left=thin, right=thin, top=thin, bottom=thin)
+    center = Alignment(horizontal="center", vertical="center", wrap_text=True)
+    left   = Alignment(horizontal="left",   vertical="center")
+
+    def sc(cell_ref, value="", fill=None, font=None, align=None, brd=True):
+        c = ws[cell_ref]
+        c.value = value
+        if fill:  c.fill = fill
+        if font:  c.font = font
+        if align: c.alignment = align
+        if brd:   c.border = border
+        return c
+
+    # ── Fila 1: título ──
+    ws.merge_cells("A1:K1")
+    sc("A1", "Beneficiarios PI Activos por Unidad de Servicio",
+       font=Font(bold=True, size=11, color="1A1916"),
+       fill=hfill(C_HEADER), align=center, brd=False)
+    ws.row_dimensions[1].height = 22
+
+    # ── Fila 2: grupos de tipo ──
+    ws.merge_cells("A2:A4")
+    sc("A2", "Unidad de Servicio",
+       fill=hfill(C_HEADER), font=hfont(color="1A1916"), align=center)
+
+    ws.merge_cells("B2:D2")
+    sc("B2", "MENOR DE SEIS MESES", fill=hfill(C_GREEN1), font=hfont(), align=center)
+
+    ws.merge_cells("E2:I2")
+    sc("E2", "NIÑO O NIÑA ENTRE 6 MESES Y 5 AÑOS Y 11 MESES",
+       fill=hfill(C_GREEN2), font=hfont(), align=center)
+
+    ws.merge_cells("J2:J4")
+    sc("J2", "PERSONA GESTANTE", fill=hfill(C_GREEN3), font=hfont(), align=center)
+
+    ws.merge_cells("K2:K4")
+    sc("K2", "Total general", fill=hfill(C_GREEN1), font=hfont(), align=center)
+
+    ws.row_dimensions[2].height = 32
+
+    # ── Fila 3: sexo ──
+    # MENOR: H, M, Total (sin sub-rangos de edad — todos son < 6 meses)
+    ws.merge_cells("B3:B4")
+    sc("B3", "Hombre", fill=hfill(C_GREEN1), font=hfont(), align=center)
+    ws.merge_cells("C3:C4")
+    sc("C3", "Mujer", fill=hfill(C_GREEN1), font=hfont(), align=center)
+    ws.merge_cells("D3:D4")
+    sc("D3", "Total", fill=hfill(C_GREEN1), font=hfont(), align=center)
+
+    # NIÑO: Hombre (2 sub-rangos) | Mujer (2 sub-rangos) | Total
+    ws.merge_cells("E3:F3")
+    sc("E3", "Hombre", fill=hfill(C_GREEN2), font=hfont(), align=center)
+    ws.merge_cells("G3:H3")
+    sc("G3", "Mujer", fill=hfill(C_GREEN2), font=hfont(), align=center)
+    ws.merge_cells("I3:I4")
+    sc("I3", "Total", fill=hfill(C_GREEN2), font=hfont(), align=center)
+
+    ws.row_dimensions[3].height = 18
+
+    # ── Fila 4: sub-rangos de edad solo para NIÑO ──
+    for ref, lbl in [("E4", "<2 años"), ("F4", "2-5 años"), ("G4", "<2 años"), ("H4", "2-5 años")]:
+        sc(ref, lbl, fill=hfill(C_GREEN2), font=hfont(size=8), align=center)
+
+    ws.row_dimensions[4].height = 16
+
+    # ── Filas de datos ──
+    all_rows = filas + [totales]
+    for i, fila in enumerate(all_rows):
+        r    = i + 5
+        is_t = i == len(filas)
+        row_fill = hfill(C_LIGHT) if is_t else None
+        row_font = hfont(color="1A1916") if is_t else Font(size=9)
+
+        def v(n):
+            return n if n != 0 else None
+
+        row_vals = [
+            fila["uds"],
+            v(fila["m_h"]), v(fila["m_m"]), v(fila["m_tot"]),
+            v(fila["n_h_lt2"]), v(fila["n_h_2a5"]),
+            v(fila["n_m_lt2"]), v(fila["n_m_2a5"]),
+            v(fila["n_tot"]),
+            v(fila["g_tot"]),
+            v(fila["total"]),
+        ]
+
+        for j, val in enumerate(row_vals):
+            col_ref = f"{get_column_letter(j + 1)}{r}"
+            c = ws[col_ref]
+            c.value = val
+            c.font  = row_font
+            c.alignment = left if j == 0 else center
+            c.border = border
+            if row_fill:
+                c.fill = row_fill
+
+        ws.row_dimensions[r].height = 15
+
+    # ── Anchos de columna ──
+    ws.column_dimensions["A"].width = 32
+    for col_l in ["B","C","D","E","F","G","H","I","J","K"]:
+        ws.column_dimensions[col_l].width = 9
+
+    buf = io.BytesIO()
+    wb.save(buf)
+    buf.seek(0)
+    return buf.read(), filas, totales
 
 
 # ─────────────────────────────────────────────
@@ -257,6 +476,25 @@ def procesar(
 @app.get("/health")
 def health():
     return {"status": "ok", "timestamp": datetime.now().isoformat()}
+
+
+@app.post("/reporte-beneficiarios")
+async def reporte_beneficiarios(activos: UploadFile = File(...)):
+    data = await activos.read()
+    if len(data) > MAX_UPLOAD_MB * 1024 * 1024:
+        raise HTTPException(413, f"El archivo supera los {MAX_UPLOAD_MB} MB.")
+    try:
+        excel_bytes, filas, totales = generar_reporte(data, activos.filename)
+    except ValueError as e:
+        raise HTTPException(422, str(e))
+    except Exception as e:
+        raise HTTPException(500, f"Error procesando el archivo: {str(e)}")
+    return JSONResponse({
+        "data":     base64.b64encode(excel_bytes).decode("ascii"),
+        "filename": "Reporte_Beneficiarios_Activos.xlsx",
+        "filas":    filas,
+        "totales":  totales,
+    })
 
 
 @app.post("/procesar")
@@ -313,6 +551,7 @@ async def procesar_archivos(
                 "faltantes":  r["faltantes"],
                 "alertas":    r["alertas"],
                 "unidades":   r["unidades"],
+                "sin_toma":   r["sin_toma"],
                 "data":       base64.b64encode(r["bytes"]).decode("ascii"),
             }
             for r in todos

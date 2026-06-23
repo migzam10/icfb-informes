@@ -9,6 +9,85 @@
 
   *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
+  /* ── MÓDULO TABS ── */
+  .mod-tabs {
+    background: var(--surface);
+    border-bottom: 2px solid var(--border);
+    padding: 0 32px;
+    display: flex;
+    gap: 0;
+    position: sticky;
+    top: 56px;
+    z-index: 99;
+    box-shadow: 0 1px 4px rgba(0,0,0,0.05);
+  }
+  .mod-tab {
+    padding: 12px 20px;
+    border: none;
+    background: none;
+    font-family: var(--sans);
+    font-size: 13px;
+    font-weight: 500;
+    color: var(--muted);
+    cursor: pointer;
+    border-bottom: 3px solid transparent;
+    margin-bottom: -2px;
+    transition: color 0.15s, border-color 0.15s;
+  }
+  .mod-tab:hover { color: var(--text); }
+  .mod-tab.active { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
+
+  /* ── MÓDULO 2 LAYOUT ── */
+  #modulo-2 {
+    max-width: 760px;
+    margin: 40px auto;
+    padding: 0 20px 80px;
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+  }
+
+  /* ── TABLA REPORTE ── */
+  .rep-table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 11px;
+  }
+  .rep-table th {
+    padding: 6px 8px;
+    text-align: center;
+    font-size: 10px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    color: #fff;
+    border: 1px solid rgba(255,255,255,0.2);
+    white-space: nowrap;
+  }
+  .rep-table td {
+    padding: 6px 8px;
+    border: 1px solid var(--border);
+    text-align: center;
+    font-family: var(--mono);
+    font-size: 11px;
+  }
+  .rep-table td:first-child {
+    text-align: left;
+    font-family: var(--sans);
+    font-weight: 500;
+    white-space: nowrap;
+  }
+  .rep-table tr:hover td { background: #f8f9f6; }
+  .rep-table .th-menor { background: #0A5C36; }
+  .rep-table .th-nino  { background: #1A6B3A; }
+  .rep-table .th-gest  { background: #2E7D52; }
+  .rep-table .th-tot   { background: #0A5C36; }
+  .rep-table .row-total td {
+    background: #E8F5EE;
+    font-weight: 600;
+    border-color: #b8d8c4;
+  }
+  .rep-table .col-subtot { font-weight: 600; color: var(--accent); }
+
   :root {
     --bg:       #f4f3ef;
     --surface:  #ffffff;
@@ -467,6 +546,20 @@
     gap: 3px;
   }
 
+  /* ── SIN TOMA BANNER ── */
+  .sin-toma-banner {
+    background: #fde8e8;
+    border: 1px solid #f5c0c0;
+    border-radius: var(--radius);
+    padding: 10px 14px;
+    color: var(--danger);
+    font-size: 12px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 12px;
+  }
+
   /* ── DIVIDER ── */
   .section-divider {
     font-size: 11px;
@@ -494,7 +587,12 @@
   <span id="clock"></span>
 </header>
 
-<main>
+<nav class="mod-tabs">
+  <button class="mod-tab active" id="tab-1" onclick="setModulo(1)">Informes Nutricionales</button>
+  <button class="mod-tab" id="tab-2" onclick="setModulo(2)">Reporte de Beneficiarios</button>
+</nav>
+
+<main id="modulo-1">
 
   <!-- PASO 1: MODO -->
   <div class="card">
@@ -640,6 +738,86 @@
   </div>
 
 </main>
+
+<!-- ══════════════════════════════════════════════════════════
+     MÓDULO 2 — REPORTE DE BENEFICIARIOS ACTIVOS
+     ══════════════════════════════════════════════════════════ -->
+<div id="modulo-2" style="display:none">
+
+  <div class="card">
+    <div class="card-header">
+      <div class="step-badge">1</div>
+      <h2>Cargar archivo de beneficiarios activos</h2>
+    </div>
+    <div class="card-body">
+      <div class="files-grid">
+        <div class="file-row">
+          <div class="file-icon">👥</div>
+          <div class="file-meta">
+            <span class="file-label">Beneficiarios Activos</span>
+            <span class="file-sub">ICBFCUEBeneficiariosPIActivosRegionalizado.xlsx</span>
+            <span class="file-name" id="rep-name-activos">Sin archivo</span>
+          </div>
+          <span class="badge-requerido">Requerido</span>
+          <input class="file-input" type="file" accept=".xlsx,.xls,.csv"
+                 id="rep-input-activos" onchange="setFileName(this, 'rep-name-activos')">
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <button class="btn-run" id="rep-btn-run" onclick="procesarReporte()">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+      <polygon points="5,3 19,12 5,21"></polygon>
+    </svg>
+    Generar Reporte
+  </button>
+
+  <div class="card" id="rep-progress-section" style="display:none">
+    <div class="card-body">
+      <div class="progress-bar-wrap">
+        <div class="progress-bar indeterminate"></div>
+      </div>
+      <div class="progress-msg">Procesando archivo…</div>
+    </div>
+  </div>
+
+  <div id="rep-error-section" style="display:none">
+    <div class="error-box">
+      <span style="font-size:18px">⚠</span>
+      <div>
+        <strong>Error al procesar</strong>
+        <span id="rep-error-msg"></span>
+      </div>
+    </div>
+  </div>
+
+  <div id="rep-result-section" style="display:none">
+    <div class="card">
+      <div class="card-header">
+        <div class="step-badge" style="background: var(--success)">✓</div>
+        <h2>Reporte de beneficiarios por unidad de servicio</h2>
+      </div>
+      <div class="card-body">
+        <div class="result-table-wrap">
+          <table class="rep-table" id="rep-table"></table>
+        </div>
+        <div class="action-row" style="margin-top: 16px;">
+          <button class="btn-download" onclick="descargarReporte()">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5">
+              <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+              <polyline points="7 10 12 15 17 10"></polyline>
+              <line x1="12" y1="15" x2="12" y2="3"></line>
+            </svg>
+            Descargar Excel
+          </button>
+          <button class="btn-reset" onclick="resetReporte()">Nuevo análisis</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+</div>
 
 <script>
   // ── RELOJ ──
@@ -813,9 +991,10 @@
       const g = tipos.general  || {};
       const e = tipos.gestante || {};
 
-      const totalVinc  = (g.vinculados || 0) + (e.vinculados || 0);
-      const totalFalt  = (g.faltantes  || 0) + (e.faltantes  || 0);
-      const totalAlert = totalAlertasCriticas(g.alertas) + totalAlertasCriticas(e.alertas);
+      const totalVinc    = (g.vinculados || 0) + (e.vinculados || 0);
+      const totalFalt    = (g.faltantes  || 0) + (e.faltantes  || 0);
+      const totalAlert   = totalAlertasCriticas(g.alertas) + totalAlertasCriticas(e.alertas);
+      const totalSinToma = (g.sin_toma   || 0) + (e.sin_toma   || 0);
 
       html += `
         <div style="margin-bottom:24px;">
@@ -823,6 +1002,7 @@
                       margin-bottom:10px;letter-spacing:0.05em;">
             CONTRATO ${contrato}
           </div>
+          ${totalSinToma > 0 ? `<div class="sin-toma-banner"><span>⚠</span><span><strong>${totalSinToma}</strong> beneficiario(s) activo(s) sin ninguna toma registrada — ver hoja "Sin Tomas Registradas" en el Excel</span></div>` : ''}
           <div class="result-grid">
             <div class="stat-box">
               <div class="stat-val">${totalVinc}</div>
@@ -846,6 +1026,7 @@
                   <th>Unidades</th>
                   <th>Vinculados</th>
                   <th>Tomas faltantes</th>
+                  <th>Sin toma</th>
                   <th>Estado nutricional</th>
                   <th>Descargar</th>
                 </tr>
@@ -868,11 +1049,16 @@
     const chipF = r.faltantes > 0
       ? `<span class="chip chip-warn">${r.faltantes}</span>`
       : `<span class="chip chip-ok">0</span>`;
+    const sinT = r.sin_toma ?? 0;
+    const chipST = sinT > 0
+      ? `<span class="chip chip-danger">${sinT}</span>`
+      : `<span class="chip chip-ok">0</span>`;
     return `<tr>
       <td style="font-family:var(--sans);font-weight:500">${label}</td>
       <td>${r.unidades  || 0}</td>
       <td>${r.vinculados || 0}</td>
       <td>${chipF}</td>
+      <td>${chipST}</td>
       <td>${renderAlertasBreakdown(r.alertas)}</td>
       <td><button class="btn-dl-file" onclick="descargar(${r._idx})">↓ ${r.filename}</button></td>
     </tr>`;
@@ -893,6 +1079,124 @@
     setModo('basico');
     document.querySelector('input[name="modo"][value="basico"]').checked = true;
     archivosData = [];
+  }
+
+  // ── CAMBIO DE MÓDULO ──
+  function setModulo(n) {
+    document.getElementById('tab-1').classList.toggle('active', n === 1);
+    document.getElementById('tab-2').classList.toggle('active', n === 2);
+    document.getElementById('modulo-1').style.display = n === 1 ? '' : 'none';
+    document.getElementById('modulo-2').style.display = n === 2 ? '' : 'none';
+  }
+
+  // ── MÓDULO 2: REPORTE BENEFICIARIOS ──
+  let reporteData = null;
+
+  async function procesarReporte() {
+    const file = document.getElementById('rep-input-activos').files[0];
+    if (!file) { repError('Debes cargar el archivo de beneficiarios activos.'); return; }
+    if (file.size > 30 * 1024 * 1024) { repError(`"${file.name}" supera los 30 MB.`); return; }
+
+    document.getElementById('rep-error-section').style.display  = 'none';
+    document.getElementById('rep-result-section').style.display = 'none';
+    document.getElementById('rep-progress-section').style.display = 'block';
+    document.getElementById('rep-btn-run').disabled = true;
+
+    const fd = new FormData();
+    fd.append('activos', file);
+
+    try {
+      const resp = await fetch('/reporte-beneficiarios', { method: 'POST', body: fd });
+      if (!resp.ok) {
+        const err = await resp.json().catch(() => ({ detail: resp.statusText }));
+        throw new Error(err.detail || 'Error desconocido.');
+      }
+      reporteData = await resp.json();
+      mostrarReporteResultados(reporteData.filas, reporteData.totales);
+    } catch (err) {
+      repError(err.message);
+    } finally {
+      document.getElementById('rep-progress-section').style.display = 'none';
+      document.getElementById('rep-btn-run').disabled = false;
+    }
+  }
+
+  function repError(msg) {
+    document.getElementById('rep-error-msg').textContent = msg;
+    document.getElementById('rep-error-section').style.display  = 'block';
+    document.getElementById('rep-progress-section').style.display = 'none';
+  }
+
+  function descargarReporte() {
+    if (!reporteData) return;
+    const bytes = atob(reporteData.data);
+    const arr   = new Uint8Array(bytes.length);
+    for (let i = 0; i < bytes.length; i++) arr[i] = bytes.charCodeAt(i);
+    const blob = new Blob([arr], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement('a');
+    a.href = url; a.download = reporteData.filename; a.click();
+    URL.revokeObjectURL(url);
+  }
+
+  function mostrarReporteResultados(filas, totales) {
+    const v = n => (n ? n : '');
+    const all = [...filas, { ...totales, _tot: true }];
+
+    let html = `
+      <thead>
+        <tr>
+          <th class="th-menor" rowspan="3" style="text-align:left;min-width:180px">Unidad de Servicio</th>
+          <th class="th-menor" colspan="3">MENOR DE SEIS MESES</th>
+          <th class="th-nino"  colspan="5">NIÑO/A 6 MESES — 5 AÑOS 11 MESES</th>
+          <th class="th-gest"  rowspan="3">GESTANTE</th>
+          <th class="th-tot"   rowspan="3">TOTAL</th>
+        </tr>
+        <tr>
+          <th class="th-menor">Hombre</th>
+          <th class="th-menor">Mujer</th>
+          <th class="th-menor">Total</th>
+          <th class="th-nino" colspan="2">Hombre</th>
+          <th class="th-nino" colspan="2">Mujer</th>
+          <th class="th-nino">Total</th>
+        </tr>
+        <tr>
+          <th class="th-menor"></th>
+          <th class="th-menor"></th>
+          <th class="th-menor"></th>
+          <th class="th-nino">&lt;2</th><th class="th-nino">2-5</th>
+          <th class="th-nino">&lt;2</th><th class="th-nino">2-5</th>
+          <th class="th-nino"></th>
+        </tr>
+      </thead>
+      <tbody>`;
+
+    for (const f of all) {
+      const cls = f._tot ? ' class="row-total"' : '';
+      html += `<tr${cls}>
+        <td>${f.uds}</td>
+        <td>${v(f.m_h)}</td>
+        <td>${v(f.m_m)}</td>
+        <td class="col-subtot">${v(f.m_tot)}</td>
+        <td>${v(f.n_h_lt2)}</td><td>${v(f.n_h_2a5)}</td>
+        <td>${v(f.n_m_lt2)}</td><td>${v(f.n_m_2a5)}</td>
+        <td class="col-subtot">${v(f.n_tot)}</td>
+        <td class="col-subtot">${v(f.g_tot)}</td>
+        <td class="col-subtot" style="font-weight:700">${v(f.total)}</td>
+      </tr>`;
+    }
+
+    html += '</tbody>';
+    document.getElementById('rep-table').innerHTML = html;
+    document.getElementById('rep-result-section').style.display = 'block';
+  }
+
+  function resetReporte() {
+    document.getElementById('rep-result-section').style.display = 'none';
+    document.getElementById('rep-error-section').style.display  = 'none';
+    document.getElementById('rep-input-activos').value = '';
+    document.getElementById('rep-name-activos').textContent = 'Sin archivo';
+    reporteData = null;
   }
 </script>
 
